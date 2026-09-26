@@ -1,0 +1,288 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import ReactDOM from 'react-dom/client';
+import './styles.css';
+
+const WEATHER_CODES = {
+  0: { label: 'Clear sky', icon: '☀️' },
+  1: { label: 'Mainly clear', icon: '🌤️' },
+  2: { label: 'Partly cloudy', icon: '⛅' },
+  3: { label: 'Overcast', icon: '☁️' },
+  45: { label: 'Fog', icon: '🌫️' },
+  48: { label: 'Depositing rime fog', icon: '🌫️' },
+  51: { label: 'Light drizzle', icon: '🌦️' },
+  53: { label: 'Moderate drizzle', icon: '🌦️' },
+  55: { label: 'Heavy drizzle', icon: '🌧️' },
+  56: { label: 'Light freezing drizzle', icon: '🌧️' },
+  57: { label: 'Heavy freezing drizzle', icon: '🌧️' },
+  61: { label: 'Slight rain', icon: '🌦️' },
+  63: { label: 'Moderate rain', icon: '🌧️' },
+  65: { label: 'Heavy rain', icon: '🌧️' },
+  66: { label: 'Light freezing rain', icon: '🌧️' },
+  67: { label: 'Heavy freezing rain', icon: '🌧️' },
+  71: { label: 'Slight snow', icon: '🌨️' },
+  73: { label: 'Moderate snow', icon: '❄️' },
+  75: { label: 'Heavy snow', icon: '❄️' },
+  77: { label: 'Snow grains', icon: '❄️' },
+  80: { label: 'Rain showers', icon: '🌦️' },
+  81: { label: 'Heavy rain showers', icon: '🌧️' },
+  82: { label: 'Violent rain showers', icon: '⛈️' },
+  85: { label: 'Snow showers', icon: '🌨️' },
+  86: { label: 'Heavy snow showers', icon: '❄️' },
+  95: { label: 'Thunderstorm', icon: '⛈️' },
+  96: { label: 'Thunderstorm with hail', icon: '⛈️' },
+  99: { label: 'Severe thunderstorm', icon: '⛈️' },
+};
+
+function formatTime(value) {
+  const date = new Date(value);
+  return new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function formatDay(value) {
+  const date = new Date(value);
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+  }).format(date);
+}
+
+function getCondition(code) {
+  return WEATHER_CODES[code] || { label: 'Unknown', icon: '🌡️' };
+}
+
+async function searchCity(name) {
+  const response = await fetch(
+    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=en&format=json`
+  );
+
+  if (!response.ok) {
+    throw new Error('Unable to find that location.');
+  }
+
+  const data = await response.json();
+
+  if (!data.results || data.results.length === 0) {
+    throw new Error('No matching city was found.');
+  }
+
+  return data.results[0];
+}
+
+async function fetchWeather(latitude, longitude) {
+  const response = await fetch(
+    `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,pressure_msl,cloud_cover&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset&timezone=auto&forecast_days=7`
+  );
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch weather data.');
+  }
+
+  return response.json();
+}
+
+function App() {
+  const [query, setQuery] = useState('Cairo');
+  const [location, setLocation] = useState(null);
+  const [weather, setWeather] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const loadWeather = async (cityName) => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const city = await searchCity(cityName);
+      const forecast = await fetchWeather(city.latitude, city.longitude);
+      setLocation(city);
+      setWeather(forecast);
+    } catch (err) {
+      setError(err.message || 'Something went wrong.');
+      setWeather(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadWeather(query);
+  }, []);
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    if (!query.trim()) return;
+    loadWeather(query);
+  };
+
+  const hourlyForecast = useMemo(() => {
+    if (!weather?.hourly) return [];
+
+    return weather.hourly.time.slice(0, 8).map((time, index) => ({
+      time,
+      temp: weather.hourly.temperature_2m[index],
+      code: weather.hourly.weather_code[index],
+    }));
+  }, [weather]);
+
+  const dailyForecast = useMemo(() => {
+    if (!weather?.daily) return [];
+
+    return weather.daily.time.map((day, index) => ({
+      day,
+      code: weather.daily.weather_code[index],
+      max: weather.daily.temperature_2m_max[index],
+      min: weather.daily.temperature_2m_min[index],
+    }));
+  }, [weather]);
+
+  const current = weather?.current;
+  const currentCondition = current ? getCondition(current.weather_code) : null;
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">Weather Intelligence</p>
+          <h1>Forecast Dashboard</h1>
+        </div>
+
+        <form className="search-box" onSubmit={handleSubmit}>
+          <input
+            aria-label="Search city"
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search city..."
+          />
+          <button type="submit">Search</button>
+        </form>
+      </header>
+
+      {error && <div className="error-box">{error}</div>}
+
+      {loading ? (
+        <div className="loading-box">Loading weather data...</div>
+      ) : !weather || !location ? (
+        <div className="loading-box">No weather data available.</div>
+      ) : (
+        <>
+          <section className="hero-card card">
+            <div className="hero-header">
+              <div>
+                <p className="small-label">Current weather</p>
+                <h2>
+                  {location.name}, {location.country || location.admin1 || 'City'}
+                </h2>
+              </div>
+              <div className="badge">
+                {currentCondition?.icon} {currentCondition?.label}
+              </div>
+            </div>
+
+            <div className="hero-main">
+              <div className="temp-block">
+                <span className="temp">{Math.round(current.temperature_2m)}°C</span>
+                <span className="feels-like">Feels like {Math.round(current.apparent_temperature)}°C</span>
+              </div>
+
+              <div className="stats-grid">
+                <div className="mini-stat">
+                  <span>Humidity</span>
+                  <strong>{Math.round(current.relative_humidity_2m ?? 0)}%</strong>
+                </div>
+                <div className="mini-stat">
+                  <span>Wind</span>
+                  <strong>{Math.round(current.wind_speed_10m ?? 0)} km/h</strong>
+                </div>
+                <div className="mini-stat">
+                  <span>Pressure</span>
+                  <strong>{Math.round(current.pressure_msl ?? 0)} hPa</strong>
+                </div>
+                <div className="mini-stat">
+                  <span>Clouds</span>
+                  <strong>{Math.round(current.cloud_cover ?? 0)}%</strong>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div className="dashboard-grid">
+            <section className="card">
+              <div className="section-title-row">
+                <h3>Today</h3>
+              </div>
+
+              <div className="detail-list">
+                <div className="detail-item">
+                  <span>Sunrise</span>
+                  <strong>{formatTime(weather.daily.sunrise[0])}</strong>
+                </div>
+                <div className="detail-item">
+                  <span>Sunset</span>
+                  <strong>{formatTime(weather.daily.sunset[0])}</strong>
+                </div>
+                <div className="detail-item">
+                  <span>Max</span>
+                  <strong>{Math.round(weather.daily.temperature_2m_max[0])}°C</strong>
+                </div>
+                <div className="detail-item">
+                  <span>Min</span>
+                  <strong>{Math.round(weather.daily.temperature_2m_min[0])}°C</strong>
+                </div>
+              </div>
+            </section>
+
+            <section className="card span-2">
+              <div className="section-title-row">
+                <h3>Hourly forecast</h3>
+              </div>
+
+              <div className="hourly-grid">
+                {hourlyForecast.map((hour) => (
+                  <div key={hour.time} className="hour-item">
+                    <span>{new Date(hour.time).toLocaleTimeString([], { hour: 'numeric' })}</span>
+                    <div className="hour-icon">{getCondition(hour.code).icon}</div>
+                    <div className="bar-wrap">
+                      <div
+                        className="bar-fill"
+                        style={{ height: `${Math.min(100, Math.max(18, ((hour.temp + 10) / 50) * 100))}%` }}
+                      />
+                    </div>
+                    <strong>{Math.round(hour.temp)}°</strong>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="card span-3">
+              <div className="section-title-row">
+                <h3>7-day forecast</h3>
+              </div>
+
+              <div className="forecast-list">
+                {dailyForecast.map((day) => (
+                  <div key={day.day} className="forecast-row">
+                    <span className="forecast-day">{formatDay(day.day)}</span>
+                    <span className="forecast-icon">{getCondition(day.code).icon}</span>
+                    <span className="forecast-label">{getCondition(day.code).label}</span>
+                    <span className="forecast-temp">
+                      {Math.round(day.max)}° <small>{Math.round(day.min)}°</small>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
