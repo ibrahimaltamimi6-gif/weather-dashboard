@@ -1,2 +1,5 @@
-# weather-dashboard
-Modern weather dashboard that fetches real-time data from a public weather API with interactive maps, forecasts, and alerts
+node_modules
+dist
+.vite
+.DS_Store
+npm-debug.log*
